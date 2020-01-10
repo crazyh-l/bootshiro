@@ -13,10 +13,10 @@ import org.springframework.context.annotation.Configuration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-@Configuration
+//@Configuration
 public class ShiroConfig1 {
 
-    @Bean
+    /*@Bean
     LoginRealm getLoginRealm(){
         return new LoginRealm();
     }
@@ -32,10 +32,10 @@ public class ShiroConfig1 {
     ShiroFilterChainDefinition shiroFilterChainDefinition(){
         DefaultShiroFilterChainDefinition shiroFilterChainDefinition
                 = new DefaultShiroFilterChainDefinition();
-        //shiroFilterChainDefinition.addPathDefinition("/doLogin","anon");
+        shiroFilterChainDefinition.addPathDefinition("/doLogin","anon");
         shiroFilterChainDefinition.addPathDefinition("/**","anon");
         return shiroFilterChainDefinition;
-    }
+    }*/
 
 }
 

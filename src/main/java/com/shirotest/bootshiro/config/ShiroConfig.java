@@ -1,134 +1,179 @@
-/*
 package com.shirotest.bootshiro.config;
 
-import com.shirotest.bootshiro.filter.AnyRolesAuthorizationFilter;
-import com.shirotest.bootshiro.filter.JwtAuthFilter;
-import com.shirotest.bootshiro.realm.DbShiroRealm;
-import com.shirotest.bootshiro.realm.JWTShiroRealm;
-import com.shirotest.bootshiro.service.UserService;
-import org.apache.shiro.authc.Authenticator;
+
+import com.shirotest.bootshiro.filter.JwtFilter;
+import com.shirotest.bootshiro.realm.JwtRealm;
+import com.shirotest.bootshiro.realm.ShiroRealm;
+import com.shirotest.bootshiro.response.JwtCredentialsMatcher;
+import com.shirotest.bootshiro.response.MultiRealmAuthenticator;
+import org.apache.shiro.authc.credential.CredentialsMatcher;
+import org.apache.shiro.authc.credential.HashedCredentialsMatcher;
+import org.apache.shiro.authc.pam.AuthenticationStrategy;
 import org.apache.shiro.authc.pam.FirstSuccessfulStrategy;
 import org.apache.shiro.authc.pam.ModularRealmAuthenticator;
-import org.apache.shiro.mgt.SecurityManager;
+import org.apache.shiro.mgt.DefaultSessionStorageEvaluator;
+import org.apache.shiro.mgt.DefaultSubjectDAO;
 import org.apache.shiro.mgt.SessionStorageEvaluator;
 import org.apache.shiro.realm.Realm;
+import org.apache.shiro.spring.LifecycleBeanPostProcessor;
+import org.apache.shiro.spring.security.interceptor.AuthorizationAttributeSourceAdvisor;
 import org.apache.shiro.spring.web.ShiroFilterFactoryBean;
-import org.apache.shiro.spring.web.config.DefaultShiroFilterChainDefinition;
-import org.apache.shiro.spring.web.config.ShiroFilterChainDefinition;
-import org.apache.shiro.web.mgt.DefaultWebSessionStorageEvaluator;
-import org.springframework.boot.web.servlet.DispatcherType;
+import org.apache.shiro.web.mgt.DefaultWebSecurityManager;
+import org.springframework.aop.framework.autoproxy.DefaultAdvisorAutoProxyCreator;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import org.apache.shiro.mgt.SecurityManager;
+
+
 import javax.servlet.Filter;
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Configuration
 public class ShiroConfig {
-    */
-/**
-     * 注册shiro的Filter，拦截请求
-     *//*
 
+    /**
+     * 交由 Spring 来自动地管理 Shiro-Bean 的生命周期
+     */
     @Bean
-    public FilterRegistrationBean<Filter> filterRegistrationBean(SecurityManager securityManager, UserService userService) throws Exception{
-        FilterRegistrationBean<Filter> filterRegistration = new FilterRegistrationBean<Filter>();
-        filterRegistration.setFilter((Filter)shiroFilter(securityManager, userService).getObject());
-        filterRegistration.addInitParameter("targetFilterLifecycle", "true");
-        filterRegistration.setAsyncSupported(true);
-        filterRegistration.setEnabled(true);
-        //filterRegistration.setDispatcherTypes(DispatcherType.REQUEST);
-
-        return filterRegistration;
+    public static LifecycleBeanPostProcessor getLifecycleBeanPostProcessor() {
+        return new LifecycleBeanPostProcessor();
     }
 
-    */
-/**
-     * 初始化Authenticator
-     *//*
+    /**
+     * 为 Spring-Bean 开启对 Shiro 注解的支持
+     */
+    @Bean
+    public AuthorizationAttributeSourceAdvisor authorizationAttributeSourceAdvisor(SecurityManager securityManager) {
+        AuthorizationAttributeSourceAdvisor authorizationAttributeSourceAdvisor = new AuthorizationAttributeSourceAdvisor();
+        authorizationAttributeSourceAdvisor.setSecurityManager(securityManager);
+        return authorizationAttributeSourceAdvisor;
+    }
 
     @Bean
-    public Authenticator authenticator(UserService userService) {
-        ModularRealmAuthenticator authenticator = new ModularRealmAuthenticator();
-        //设置两个Realm，一个用于用户登录验证和访问权限获取；一个用于jwt token的认证
-        authenticator.setRealms(Arrays.asList(jwtShiroRealm(userService), dbShiroRealm(userService)));
-        //设置多个realm认证策略，一个成功即跳过其它的
-        authenticator.setAuthenticationStrategy(new FirstSuccessfulStrategy());
+    public DefaultAdvisorAutoProxyCreator defaultAdvisorAutoProxyCreator() {
+        DefaultAdvisorAutoProxyCreator app = new DefaultAdvisorAutoProxyCreator();
+        app.setProxyTargetClass(true);
+        return app;
+
+    }
+
+    /**
+     * 不向 Spring容器中注册 JwtFilter Bean，防止 Spring 将 JwtFilter 注册为全局过滤器
+     * 全局过滤器会对所有请求进行拦截，而本例中只需要拦截除 /login 和 /logout 外的请求
+     * 另一种简单做法是：直接去掉 jwtFilter()上的 @Bean 注解
+     */
+    @Bean
+    public FilterRegistrationBean<Filter> registration(JwtFilter filter) {
+        FilterRegistrationBean<Filter> registration = new FilterRegistrationBean<Filter>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    public JwtFilter jwtFilter() {
+        return new JwtFilter();
+    }
+
+    /**
+     * 配置访问资源需要的权限
+     */
+    @Bean
+    ShiroFilterFactoryBean shiroFilterFactoryBean(SecurityManager securityManager) {
+        ShiroFilterFactoryBean shiroFilterFactoryBean = new ShiroFilterFactoryBean();
+        shiroFilterFactoryBean.setSecurityManager(securityManager);
+        shiroFilterFactoryBean.setLoginUrl("/login");
+        shiroFilterFactoryBean.setSuccessUrl("/authorized");
+        shiroFilterFactoryBean.setUnauthorizedUrl("/unauthorized");
+
+        // 添加 jwt 专用过滤器，拦截除 /login 和 /logout 外的请求
+        Map<String, Filter> filterMap = new LinkedHashMap<>();
+        filterMap.put("jwtFilter", jwtFilter());
+        shiroFilterFactoryBean.setFilters(filterMap);
+
+        LinkedHashMap<String, String> filterChainDefinitionMap = new LinkedHashMap<String, String>();
+        filterChainDefinitionMap.put("/login", "anon"); // 可匿名访问
+        filterChainDefinitionMap.put("/logout", "logout"); // 退出登录
+        filterChainDefinitionMap.put("/**", "jwtFilter,authc"); // 需登录才能访问
+        shiroFilterFactoryBean.setFilterChainDefinitionMap(filterChainDefinitionMap);
+        return shiroFilterFactoryBean;
+    }
+
+    /**
+     * 配置 ModularRealmAuthenticator
+     */
+    @Bean
+    public ModularRealmAuthenticator authenticator() {
+        ModularRealmAuthenticator authenticator = new MultiRealmAuthenticator();
+        // 设置多 Realm的认证策略，默认 AtLeastOneSuccessfulStrategy
+        AuthenticationStrategy strategy = new FirstSuccessfulStrategy();
+        authenticator.setAuthenticationStrategy(strategy);
         return authenticator;
     }
 
-    */
-/**
-    * 禁用session, 不保存用户登录状态。保证每次请求都重新认证。
-    * 需要注意的是，如果用户代码里调用Subject.getSession()还是可以用session，如果要完全禁用，要配合下面的noSessionCreation的Filter来实现
-    *//*
-
+    /**
+     * 禁用session, 不保存用户登录状态。保证每次请求都重新认证
+     */
     @Bean
-    protected SessionStorageEvaluator sessionStorageEvaluator(){
-        DefaultWebSessionStorageEvaluator sessionStorageEvaluator = new DefaultWebSessionStorageEvaluator();
+    protected SessionStorageEvaluator sessionStorageEvaluator() {
+        DefaultSessionStorageEvaluator sessionStorageEvaluator = new DefaultSessionStorageEvaluator();
         sessionStorageEvaluator.setSessionStorageEnabled(false);
         return sessionStorageEvaluator;
     }
-    */
-/**
-    * 用于用户名密码登录时认证的realm
-    *//*
 
-    @Bean("dbRealm")
-    public Realm dbShiroRealm(UserService userService) {
-        DbShiroRealm myShiroRealm = new DbShiroRealm(userService);
-        return myShiroRealm;
-    }
-    */
-/**
-    * 用于JWT token认证的realm
-    *//*
-
-    @Bean("jwtRealm")
-    public Realm jwtShiroRealm(UserService userService) {
-        JWTShiroRealm myShiroRealm = new JWTShiroRealm(userService);
-        return myShiroRealm;
-    }
-
-    */
-/**
-     * 设置过滤器，将自定义的Filter加入
-     *//*
-
-    @Bean("shiroFilter")
-    public ShiroFilterFactoryBean shiroFilter(SecurityManager securityManager, UserService userService) {
-        ShiroFilterFactoryBean factoryBean = new ShiroFilterFactoryBean();
-        factoryBean.setSecurityManager(securityManager);
-        Map<String, Filter> filterMap = factoryBean.getFilters();
-        filterMap.put("authcToken", createAuthFilter(userService));
-        filterMap.put("anyRole", createRolesFilter());
-        factoryBean.setFilters(filterMap);
-        factoryBean.setFilterChainDefinitionMap(shiroFilterChainDefinition().getFilterChainMap());
-
-        return factoryBean;
-    }
-
+    /**
+     * JwtRealm 配置，需实现 Realm 接口
+     */
     @Bean
-    protected ShiroFilterChainDefinition shiroFilterChainDefinition() {
-        DefaultShiroFilterChainDefinition chainDefinition = new DefaultShiroFilterChainDefinition();
-        chainDefinition.addPathDefinition("/login", "noSessionCreation,anon");  //login不做认证，noSessionCreation的作用是用户在操作session时会抛异常
-        chainDefinition.addPathDefinition("/logout", "noSessionCreation,authcToken[permissive]"); //做用户认证，permissive参数的作用是当token无效时也允许请求访问，不会返回鉴权未通过的错误
-        chainDefinition.addPathDefinition("/image/**", "anon");
-        chainDefinition.addPathDefinition("/admin/**", "noSessionCreation,authcToken,anyRole[admin,manager]"); //只允许admin或manager角色的用户访问
-        chainDefinition.addPathDefinition("/article/list", "noSessionCreation,authcToken");
-        chainDefinition.addPathDefinition("/article/*", "noSessionCreation,authcToken[permissive]");
-        chainDefinition.addPathDefinition("/**", "noSessionCreation,authcToken"); // 默认进行用户鉴权
-        return chainDefinition;
-    }
-    //注意不要加@Bean注解，不然spring会自动注册成filter
-    protected JwtAuthFilter createAuthFilter(UserService userService){
-        return new JwtAuthFilter(userService);
-    }
-    //注意不要加@Bean注解，不然spring会自动注册成filter
-    protected AnyRolesAuthorizationFilter createRolesFilter(){
-        return new AnyRolesAuthorizationFilter();
+    JwtRealm jwtRealm() {
+        JwtRealm jwtRealm = new JwtRealm();
+        // 设置加密算法
+        CredentialsMatcher credentialsMatcher = new JwtCredentialsMatcher();
+        // 设置加密次数
+        jwtRealm.setCredentialsMatcher(credentialsMatcher);
+        return jwtRealm;
     }
 
-}*/
+    /**
+     * ShiroRealm 配置，需实现 Realm 接口
+     */
+    @Bean
+    ShiroRealm shiroRealm() {
+        ShiroRealm shiroRealm = new ShiroRealm();
+        // 设置加密算法
+        HashedCredentialsMatcher credentialsMatcher = new HashedCredentialsMatcher("SHA-1");
+        // 设置加密次数
+        credentialsMatcher.setHashIterations(16);
+        shiroRealm.setCredentialsMatcher(credentialsMatcher);
+        return shiroRealm;
+    }
+
+    /**
+     * 配置 SecurityManager
+     */
+    @Bean
+    public SecurityManager securityManager() {
+        DefaultWebSecurityManager securityManager = new DefaultWebSecurityManager();
+
+        // 1.Authenticator
+        securityManager.setAuthenticator(authenticator());
+
+        // 2.Realm
+        List<Realm> realms = new ArrayList<Realm>(16);
+        realms.add(jwtRealm());
+        realms.add(shiroRealm());
+        securityManager.setRealms(realms);
+
+        // 3.关闭shiro自带的session
+        DefaultSubjectDAO subjectDAO = new DefaultSubjectDAO();
+        subjectDAO.setSessionStorageEvaluator(sessionStorageEvaluator());
+        securityManager.setSubjectDAO(subjectDAO);
+
+        return securityManager;
+    }
+
+}

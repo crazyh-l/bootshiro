@@ -2,17 +2,17 @@ package com.shirotest.bootshiro.token;
 
 import org.apache.shiro.authc.HostAuthenticationToken;
 
-public class JWTToken implements HostAuthenticationToken {
+public class JWTTokens implements HostAuthenticationToken {
 
     private String token;
 
     private String host;
 
-    public JWTToken(String token){
+    public JWTTokens(String token){
         this(token,null);
     }
 
-    public JWTToken(String token,String host){
+    public JWTTokens(String token, String host){
         this.token = token;
         this.host = host;
     }
